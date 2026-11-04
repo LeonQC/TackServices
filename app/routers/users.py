@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User, Workspace, WorkspaceMember
-from app.schemas import MeOut, MessageOut, MyWorkspace, PasswordChange, UserOut, UserUpdate
-from app.security import get_current_user, hash_password, verify_password
+from app.schemas import MeOut, MyWorkspace, UserOut, UserUpdate
+from app.security import get_current_user
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -43,13 +43,3 @@ def update_me(payload: UserUpdate, current_user: User = Depends(get_current_user
     db.refresh(current_user)
     return current_user
 
-
-@router.patch("/me/password", response_model=MessageOut)
-def change_password(
-    payload: PasswordChange, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
-):
-    if not verify_password(payload.current_password, current_user.password_hash):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-    current_user.password_hash = hash_password(payload.new_password)
-    db.commit()
-    return MessageOut(message="Password changed successfully.")

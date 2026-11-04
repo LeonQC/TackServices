@@ -6,7 +6,6 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, Str
 # ---------- Users and auth ----------
 
 WorkspaceRole = Literal["Admin", "Member"]
-Password = Annotated[str, Field(min_length=8, max_length=255)]
 
 
 class UserOut(BaseModel):
@@ -19,23 +18,10 @@ class UserOut(BaseModel):
     created_at: datetime
 
 
-class UserCreate(BaseModel):
-    email: EmailStr = Field(max_length=255) # EmailStr checks for valid email format
-    username: str = Field(min_length=1, max_length=64)
-    name: str = Field(default=None, min_length=1, max_length=255)  # optional; defaults to the username
-    password: str = Field(min_length=8, max_length=255)  # Password must be at least 8 characters long
-    # No role: a role belongs to a workspace membership, not the account. Only an Admin can promote someone (PATCH /w/{slug}/members/{id}).
-
-
 class UserUpdate(BaseModel):
     email: EmailStr = Field(default=None, max_length=255)
     username: str = Field(default=None, min_length=1, max_length=64)
     name: str = Field(default=None, min_length=1, max_length=255)
-
-
-class PasswordChange(BaseModel):
-    current_password: str
-    new_password: Password
 
 
 class MyWorkspace(BaseModel):
@@ -49,9 +35,19 @@ class MeOut(UserOut):
     workspaces: list[MyWorkspace]
 
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
+class GoogleAuthRequest(BaseModel):
+    token: str  # the ID token ("credential") from the Sign in with Google button
+    # Only for a new account, sent after the app answered signup_required. Email comes from Google.
+    # No role: a role belongs to a workspace membership, not the account. Only an Admin can promote someone (PATCH /w/{slug}/members/{id}).
+    username: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=255)  # optional; defaults to the Google name
+
+
+class GoogleSignupRequired(BaseModel):
+    """No account for this Google user yet: ask for a username, then send the token again with it."""
+    signup_required: Literal[True] = True
+    email: str
+    name: str  # Google's display name, to prefill the form
 
 
 class RefreshRequest(BaseModel):
@@ -67,10 +63,6 @@ class Token(BaseModel):
 class LoginResponse(Token):
     refresh_token: str
     user: UserOut
-
-
-class MessageOut(BaseModel):
-    message: str
 
 
 # Trimmed before the length check, so "Q4 launch " and "Q4 launch" count as the same name.

@@ -11,16 +11,11 @@
     - [0. Conventions](#0-conventions)
       - [Objects](#objects)
     - [1. User Management Endpoints](#1-user-management-endpoints)
-      - [1.1. Register User (Username/Password)](#11-register-user-usernamepassword)
-      - [1.2. Register with Google](#12-register-with-google)
-      - [1.3. Login (Username/Password)](#13-login-usernamepassword)
-      - [1.4. Refresh Token](#14-refresh-token)
-      - [1.5. Logout (Client-side)](#15-logout-client-side)
-      - [1.6. Get User Profile](#16-get-user-profile)
-      - [1.7. Update User Profile](#17-update-user-profile)
-      - [1.8. Request Password Reset](#18-request-password-reset)
-      - [1.9. Confirm Password Reset](#19-confirm-password-reset)
-      - [1.10. Change Password (Logged-in User)](#110-change-password-logged-in-user)
+      - [1.1. Sign in with Google](#11-sign-in-with-google)
+      - [1.2. Refresh Token](#12-refresh-token)
+      - [1.3. Logout (Client-side)](#13-logout-client-side)
+      - [1.4. Get User Profile](#14-get-user-profile)
+      - [1.5. Update User Profile](#15-update-user-profile)
     - [2. Workspace and Member Endpoints](#2-workspace-and-member-endpoints)
       - [2.1. List My Workspaces](#21-list-my-workspaces)
       - [2.2. Create Workspace](#22-create-workspace)
@@ -95,7 +90,7 @@
 
 ## Overview
 
-This document outlines the API endpoints for the **TaskManagement** service. All paths are served under `/api` (e.g. `POST /api/auth/login`). The resources follow the structure in the schema doc:
+This document outlines the API endpoints for the **TaskManagement** service. All paths are served under `/api` (e.g. `POST /api/auth/google`). The resources follow the structure in the schema doc:
 
 ```
 User
@@ -110,9 +105,9 @@ User
 TaskManagement allows users to:
 
 1. **User Management**
-   1. Create user accounts via standard credentials or Google OAuth
+   1. Sign up and log in with Google (the only login method)
    2. Secure sessions using JWT authentication with refresh token support
-   3. Manage their own profile and password
+   3. Manage their own profile
 
 2. **Workspaces and Members**
    1. Create workspaces and switch between the ones they belong to
@@ -306,71 +301,30 @@ These shapes are returned by many endpoints below.
 
 The account itself. It isn't inside any workspace.
 
-#### 1.1. Register User (Username/Password)
+#### 1.1. Sign in with Google
 
-**Purpose:** Create an account. A new account belongs to no workspace yet: the user then creates one (2.2) or is added to one by an Admin (2.6).
+**Purpose:** Log in, or sign up, with Google. This is the only way to log in: there are no passwords. The frontend's Sign in with Google button gives it a Google ID token (the "credential"); the backend checks it was signed by Google for our client ID (`GOOGLE_CLIENT_ID`) and that Google verified the email.
 
-**Endpoint:** `/auth/register`
-
-**Method:** `POST`
-
-**Request Body:** (`name` is optional and defaults to the username; password at least 8 characters)
-
-```json
-{
-  "username": "henry_dev",
-  "email": "henry@example.com",
-  "password": "securepassword123",
-  "name": "Henry"
-}
-```
-
-**Response:** (201 Created) a **User**.
-
-**Errors:** 409 email or username taken · 422 invalid email / short password
-
----
-
-#### 1.2. Register with Google
-
-**Planned.**
-
-**Purpose:** Create a new user account with Google authentication.
+- **Known user** (matched by Google account): logged in.
+- **Account from before Google login** (no Google account linked yet, same email): linked to this Google account, then logged in.
+- **New user, no `username` sent:** nothing is created; the response is `signup_required` with the Google email and name, so the app can ask for a username (and a display name, prefilled).
+- **New user with `username`:** the app sends the same Google token again with `username` (and optional `name`, which defaults to the Google name). The account is created with the Google email and logged in. Like any new account it belongs to no workspace yet: the user then creates one (2.2) or is added to one by an Admin (2.6).
 
 **Endpoint:** `/auth/google`
 
 **Method:** `POST`
 
-**Request Body:**
+**Request Body:** (`username` and `name` only when creating an account)
 
 ```json
 {
-  "token": "google_oauth_token"
-}
-```
-
-**Response:** (201 Created) a **User**.
-
----
-
-#### 1.3. Login (Username/Password)
-
-**Purpose:** Authenticate and get an access token and a refresh token. (Swagger's Authorize button uses the same login as a form post at `/auth/token`.)
-
-**Endpoint:** `/auth/login`
-
-**Method:** `POST`
-
-**Request Body:**
-
-```json
-{
+  "token": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ij...",
   "username": "henry_dev",
-  "password": "securepassword123"
+  "name": "Henry"
 }
 ```
 
-**Response:** (200 OK)
+**Response:** (200 OK) logged in:
 
 ```json
 {
@@ -382,11 +336,19 @@ The account itself. It isn't inside any workspace.
 }
 ```
 
-**Errors:** 401 incorrect username or password
+or (200 OK) a new user without `username`:
+
+```json
+{ "signup_required": true, "email": "henry@example.com", "name": "Henry Dev" }
+```
+
+**Errors:** 401 invalid or expired Google token, or email not verified by Google · 409 username taken, or the email belongs to an account linked to a different Google account
+
+**Swagger:** there is no login form; its Authorize button takes an access token (from this endpoint's response) pasted as a Bearer token.
 
 ---
 
-#### 1.4. Refresh Token
+#### 1.2. Refresh Token
 
 **Purpose:** Get a new access token using a refresh token. An access token is rejected here, and a refresh token is rejected everywhere else.
 
@@ -416,7 +378,7 @@ The account itself. It isn't inside any workspace.
 
 ---
 
-#### 1.5. Logout (Client-side)
+#### 1.3. Logout (Client-side)
 
 **Purpose:** Client removes tokens from storage. No server-side action required with pure JWT.
 
@@ -424,7 +386,7 @@ The account itself. It isn't inside any workspace.
 
 ---
 
-#### 1.6. Get User Profile
+#### 1.4. Get User Profile
 
 **Purpose:** The current user, plus each workspace they belong to with their role there. The frontend uses the list for the workspace switcher and opens the first one after login.
 
@@ -450,7 +412,7 @@ The account itself. It isn't inside any workspace.
 
 ---
 
-#### 1.7. Update User Profile
+#### 1.5. Update User Profile
 
 **Purpose:** Update the current user's username, email, or display name.
 
@@ -471,74 +433,6 @@ The account itself. It isn't inside any workspace.
 **Response:** (200 OK) a **User**.
 
 **Errors:** 409 email or username taken
-
----
-
-#### 1.8. Request Password Reset
-
-**Planned.**
-
-**Purpose:** Start a password-reset flow by sending a reset link to the user's email.
-
-**Endpoint:** `/auth/password-reset/request`
-
-**Method:** `POST`
-
-**Request Body:**
-
-```json
-{
-  "email": "henry@example.com"
-}
-```
-
-**Response:** (200 OK) `{ "message": "Password reset email sent." }` (also when the email is unknown, so the endpoint can't be used to find out who has an account)
-
----
-
-#### 1.9. Confirm Password Reset
-
-**Planned.**
-
-**Purpose:** Complete password reset using the token sent by email.
-
-**Endpoint:** `/auth/password-reset/confirm`
-
-**Method:** `POST`
-
-**Request Body:**
-
-```json
-{
-  "token": "abcdef1234567890",
-  "new_password": "NewP@ssw0rd!"
-}
-```
-
-**Response:** (200 OK) `{ "message": "Password has been reset successfully." }`
-
----
-
-#### 1.10. Change Password (Logged-in User)
-
-**Purpose:** Allow a signed-in user to update their password.
-
-**Endpoint:** `/users/me/password`
-
-**Method:** `PATCH`
-
-**Request Body:**
-
-```json
-{
-  "current_password": "OldP@ss1",
-  "new_password": "NewP@ssw0rd!"
-}
-```
-
-**Response:** (200 OK) `{ "message": "Password changed successfully." }`
-
-**Errors:** 400 current password is incorrect · 422 new password shorter than 8
 
 ---
 

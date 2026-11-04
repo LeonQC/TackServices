@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import OAuth2PasswordRequestForm
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -7,17 +8,13 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models import User
-from app.schemas import LoginRequest, LoginResponse, RefreshRequest, Token, UserCreate, UserOut
-from app.security import create_token, hash_password, user_from_token, verify_password
+from app.schemas import GoogleAuthRequest, GoogleSignupRequired, LoginResponse, RefreshRequest, Token, UserOut
+from app.security import create_token, user_from_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-
-def authenticate(db: Session, username: str, password: str) -> User:
-    user = db.scalars(select(User).where(User.username == username)).first()
-    if user is None or not verify_password(password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
-    return user
+# Reused across requests: it caches Google's public signing keys instead of downloading them every time.
+google_transport = google_requests.Request()
 
 
 def login_response(user: User) -> LoginResponse:
@@ -29,37 +26,56 @@ def login_response(user: User) -> LoginResponse:
     )
 
 
-@router.post("/register", response_model=UserOut, status_code=201)
-def register(payload: UserCreate, db: Session = Depends(get_db)):
+@router.post("/google", response_model=LoginResponse | GoogleSignupRequired)
+def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """Log in with a Google ID token (the "credential" the Sign in with Google button returns).
+
+    Known user → tokens. New user without a username → signup_required, so the app can ask for one and send the
+    same Google token again with username (and name) to create the account.
+    """
+    try:
+        # Checks Google's signature, expiry, and that the token was issued for our client ID.
+        claims = id_token.verify_oauth2_token(payload.token, google_transport, settings.google_client_id)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+    if not claims.get("email_verified"):
+        raise HTTPException(status_code=401, detail="Google account email is not verified")
+    google_id, email = claims["sub"], claims["email"].lower()
+
+    user = db.scalars(select(User).where(User.auth_provider == "google", User.auth_provider_id == google_id)).first()
+    if user is not None:
+        return login_response(user)
+
+    # Not linked yet: an account made before Google login (password era) links by its email.
+    user = db.scalars(select(User).where(User.email == email)).first()
+    if user is not None:
+        # Only an unlinked account may be claimed; one tied to another Google account keeps its owner.
+        if user.auth_provider is not None:
+            raise HTTPException(status_code=409, detail="This email belongs to another account")
+        user.auth_provider, user.auth_provider_id = "google", google_id
+        db.commit()
+        return login_response(user)
+
+    if payload.username is None:
+        return GoogleSignupRequired(email=email, name=claims.get("name", ""))
+
     # A new account belongs to no workspace yet: it creates one (and is its Admin) or gets added to one.
     user = User(
-        email=payload.email.lower(),
+        email=email,
         username=payload.username,
-        name=payload.name or payload.username,
-        password_hash=hash_password(payload.password),
+        name=payload.name or claims.get("name") or payload.username,
+        auth_provider="google",
+        auth_provider_id=google_id,
     )
     db.add(user)
     try:
         db.commit()
     except IntegrityError:
-    # Why not check "does this email exist?" first, then insert?
-    # Two sign-ups could arrive at almost the same moment.
-    # Both would check, both would see "free", and both would insert.
+        # The unique index decides, not a check-then-insert: two sign-ups at the same moment can't both win.
         db.rollback()
-        raise HTTPException(status_code=409, detail="Email or username already taken")
+        raise HTTPException(status_code=409, detail="Username already taken")
     db.refresh(user)
-    return user
-
-
-@router.post("/login", response_model=LoginResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    return login_response(authenticate(db, payload.username, payload.password))
-
-
-@router.post("/token", response_model=LoginResponse, include_in_schema=False)
-def login_form(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """The same login as a form post: what Swagger's Authorize button sends (OAuth2 password flow)."""
-    return login_response(authenticate(db, form.username, form.password))
+    return login_response(user)
 
 
 @router.post("/refresh", response_model=Token)

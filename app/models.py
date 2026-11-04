@@ -26,8 +26,6 @@ def updated_at_column() -> Mapped[datetime]:
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        # Every user can log in somehow: with a password, or through a provider like Google.
-        CheckConstraint("password_hash IS NOT NULL OR auth_provider IS NOT NULL", name="can_log_in"),
         # One Google account maps to exactly one user. Local users have (NULL, NULL), and NULLs never
         # count as equal in a UNIQUE index, so any number of local users is fine.
         Index("ix_users_auth_provider", "auth_provider", "auth_provider_id", unique=True),
@@ -37,7 +35,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(Text, unique=True)
     email: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
-    password_hash: Mapped[str | None] = mapped_column(Text)
+    # Login is Google-only. NULL here = an account from before that, linked by email on its first Google sign-in.
     auth_provider: Mapped[str | None] = mapped_column(Text)
     auth_provider_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_column()

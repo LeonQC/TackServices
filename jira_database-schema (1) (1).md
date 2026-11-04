@@ -78,7 +78,7 @@ $$ LANGUAGE plpgsql;
 
 ### Table: users
 
-The account itself. It belongs to no workspace; roles live in `workspace_members`.
+The account itself. It belongs to no workspace; roles live in `workspace_members`. Login is Google-only, so there is no password.
 
 | Column           | Type      | Constraints      | Description                                                        |
 | ---------------- | --------- | ---------------- | ------------------------------------------------------------------ |
@@ -86,9 +86,8 @@ The account itself. It belongs to no workspace; roles live in `workspace_members
 | username         | TEXT      | UNIQUE, NOT NULL | User's chosen username                                             |
 | email            | TEXT      | UNIQUE, NOT NULL | User's email address                                               |
 | name             | TEXT      | NOT NULL         | Display name ("Keya Wang")                                         |
-| password_hash    | TEXT      |                  | Hashed password (NULL for OAuth users)                             |
-| auth_provider    | TEXT      |                  | Authentication provider (NULL for local auth, "google" for Google) |
-| auth_provider_id | TEXT      |                  | Provider-specific user ID                                          |
+| auth_provider    | TEXT      |                  | "google"; NULL = made before Google login, linked by email on its first Google sign-in |
+| auth_provider_id | TEXT      |                  | Google's user ID (the ID token's `sub`)                            |
 | created_at       | TIMESTAMPTZ | NOT NULL         | When the user was created                                          |
 | updated_at       | TIMESTAMPTZ | NOT NULL         | When the user was last updated                                     |
 
@@ -107,13 +106,10 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
-    password_hash TEXT, -- NULL for OAuth users
-    auth_provider TEXT, -- 'google', 'github', etc.
+    auth_provider TEXT, -- 'google'; NULL until an older account is linked
     auth_provider_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- every user can log in somehow: with a password, or through a provider
-    CHECK (password_hash IS NOT NULL OR auth_provider IS NOT NULL)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth ON users (auth_provider, auth_provider_id);

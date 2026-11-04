@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str
     jwt_access_expire: int = 3600  # seconds (1 hour)
     jwt_refresh_expire: int = 604800  # seconds (7 days)
+    google_client_id: str  # Google ID tokens must be issued for this client, or they're rejected
 
 
 settings = Settings()

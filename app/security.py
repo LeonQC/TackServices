@@ -2,30 +2,19 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
-from pwdlib import PasswordHash
-from pwdlib.hashers.argon2 import Argon2Hasher
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.models import User
 
-password_hasher = PasswordHash((Argon2Hasher(),))
-
 ALGORITHM = "HS256"
 
-# Swagger's Authorize button logs in through this form endpoint (the app itself uses JSON /auth/login).
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
-
-
-def hash_password(password: str) -> str:
-    return password_hasher.hash(password)
-
-
-def verify_password(password: str, hashed: str | None) -> bool:
-    # Google-only users have no password, so no password can match.
-    return hashed is not None and password_hasher.verify(password, hashed)
+# Login is Google-only, so Swagger can't log in by itself: its Authorize button takes an access token you paste
+# (get one by signing in through the app, or from the /auth/google response).
+# auto_error=False: a missing header becomes our 401 below instead of HTTPBearer's 403.
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def create_token(user_id: int, kind: str) -> str:
@@ -62,5 +51,7 @@ def user_from_token(db: Session, token: str, kind: str) -> User:
     return user
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
-    return user_from_token(db, token, "access")
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme), db: Session = Depends(get_db)
+) -> User:
+    return user_from_token(db, credentials.credentials if credentials else "", "access")
